@@ -1,6 +1,7 @@
 package gocache
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 )
@@ -58,4 +59,12 @@ func NewStringCache(m ...map[string]string) (s *StringCache) {
 		return s
 	}
 	return &StringCache{m: new(sync.RWMutex), v: make(map[string]string)}
+}
+
+func (s *StringCache) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &s.v)
+}
+
+func (s *StringCache) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.v)
 }
