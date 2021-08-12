@@ -31,6 +31,13 @@ func (s *StringCache) Set(k string, v string) {
 
 }
 
+func (s *StringCache) Exists(k string) bool {
+	s.m.RLock()
+	defer s.m.RUnlock()
+	_, ok := s.v[k]
+	return ok
+}
+
 //Delete a value
 func (s *StringCache) Delete(k string) {
 	s.m.Lock()
