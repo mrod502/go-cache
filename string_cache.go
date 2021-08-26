@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -74,4 +76,12 @@ func (s *StringCache) UnmarshalJSON(b []byte) error {
 
 func (s *StringCache) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
+}
+
+func (s *StringCache) UnmarshalYAML(b []byte) error {
+	return yaml.Unmarshal(b, &s.v)
+}
+
+func (s *StringCache) MarshalYAML() ([]byte, error) {
+	return yaml.Marshal(s.v)
 }

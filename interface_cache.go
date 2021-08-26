@@ -3,6 +3,8 @@ package gocache
 import (
 	"encoding/json"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 type InterfaceCache struct {
@@ -70,4 +72,25 @@ func (s *InterfaceCache) UnmarshalJSON(b []byte) error {
 
 func (s *InterfaceCache) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
+}
+
+func (s *InterfaceCache) Query(q Qry, a QueryAppender) {
+	for _, v := range s.GetKeys() {
+		if q.Match(s.Get(v)) {
+			if a(q) {
+				return
+			}
+		}
+	}
+
+}
+
+type QueryAppender func(v interface{}) bool
+
+func (s *InterfaceCache) UnmarshalYAML(b []byte) error {
+	return yaml.Unmarshal(b, &s.v)
+}
+
+func (s *InterfaceCache) MarshalYAML() ([]byte, error) {
+	return yaml.Marshal(s.v)
 }

@@ -3,6 +3,8 @@ package gocache
 import (
 	"encoding/json"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 type IntCache struct {
@@ -91,4 +93,12 @@ func (s *IntCache) UnmarshalJSON(b []byte) error {
 
 func (s *IntCache) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
+}
+
+func (s *IntCache) UnmarshalYAML(b []byte) error {
+	return yaml.Unmarshal(b, &s.v)
+}
+
+func (s *IntCache) MarshalYAML() ([]byte, error) {
+	return yaml.Marshal(s.v)
 }
