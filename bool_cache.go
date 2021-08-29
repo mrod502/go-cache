@@ -17,7 +17,6 @@ type BoolCache struct {
 func (s *BoolCache) Get(k string) (v bool) {
 	s.m.RLock()
 	defer s.m.RUnlock()
-
 	return s.v[k].Load()
 }
 
@@ -33,7 +32,6 @@ func (s *BoolCache) Set(k string, v bool) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	s.v[k] = atomic.NewBool(v)
-
 }
 
 func (s *BoolCache) Exists(k string) bool {
@@ -48,7 +46,6 @@ func (s *BoolCache) Delete(k string) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
-
 }
 
 func (s *BoolCache) GetKeys() (out []string) {
