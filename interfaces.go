@@ -7,3 +7,10 @@ type Qry interface {
 type Matcher interface {
 	Match(Qry) bool
 }
+
+type DB interface {
+	Get(string) (interface{}, error)
+	Put(string, interface{}) error
+	Exists(string) (bool, error)
+	Delete(string) error
+}

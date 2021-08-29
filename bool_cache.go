@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"sync"
 
+	"go.uber.org/atomic"
 	"gopkg.in/yaml.v3"
 )
 
 type BoolCache struct {
 	m *sync.RWMutex
-	v map[string]bool
+	v map[string]*atomic.Bool
 }
 
 //Get a value
@@ -17,14 +18,21 @@ func (s *BoolCache) Get(k string) (v bool) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 
-	return s.v[k]
+	return s.v[k].Load()
 }
 
 //Set a value
 func (s *BoolCache) Set(k string, v bool) {
+	s.m.RLock()
+	if val, ok := s.v[k]; ok {
+		val.Store(v)
+		s.m.RUnlock()
+		return
+	}
+	s.m.RUnlock()
 	s.m.Lock()
 	defer s.m.Unlock()
-	s.v[k] = v
+	s.v[k] = atomic.NewBool(v)
 
 }
 
@@ -57,13 +65,13 @@ func (s *BoolCache) GetKeys() (out []string) {
 
 func NewBoolCache(m ...map[string]bool) (s *BoolCache) {
 	if len(m) > 0 {
-		s = &BoolCache{m: new(sync.RWMutex), v: make(map[string]bool)}
+		s = &BoolCache{m: new(sync.RWMutex), v: make(map[string]*atomic.Bool)}
 		for k, v := range m[0] {
 			s.Set(k, v)
 		}
 		return s
 	}
-	return &BoolCache{m: new(sync.RWMutex), v: make(map[string]bool)}
+	return &BoolCache{m: new(sync.RWMutex), v: make(map[string]*atomic.Bool)}
 }
 
 func (s *BoolCache) UnmarshalJSON(b []byte) error {

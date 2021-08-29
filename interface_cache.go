@@ -3,29 +3,42 @@ package gocache
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type InterfaceCache struct {
-	m *sync.RWMutex
-	v map[string]interface{}
+	m             *sync.RWMutex
+	v             map[string]*container
+	db            DB
+	persist       bool
+	expire        time.Duration
+	sleepInterval time.Duration
 }
 
 //Get a value
-func (s *InterfaceCache) Get(k string) (v interface{}) {
+func (s *InterfaceCache) Get(k string) interface{} {
 	s.m.RLock()
 	defer s.m.RUnlock()
-
-	return s.v[k]
+	if v, ok := s.v[k]; ok {
+		return v.load()
+	}
+	return nil
 }
 
 //Set a value
 func (s *InterfaceCache) Set(k string, v interface{}) {
+	s.m.RLock()
+	if val, ok := s.v[k]; ok {
+		val.store(v)
+		s.m.RUnlock()
+		return
+	}
+	s.m.RUnlock()
 	s.m.Lock()
 	defer s.m.Unlock()
-	s.v[k] = v
-
+	s.v[k] = s.newContainer(v)
 }
 
 func (s *InterfaceCache) Exists(k string) bool {
@@ -57,13 +70,13 @@ func (s *InterfaceCache) GetKeys() (out []string) {
 
 func NewInterfaceCache(m ...map[string]interface{}) (s *InterfaceCache) {
 	if len(m) > 0 {
-		s = &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]interface{})}
+		s = &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]*container)}
 		for k, v := range m[0] {
 			s.Set(k, v)
 		}
 		return s
 	}
-	return &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]interface{})}
+	return &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]*container)}
 }
 
 func (s *InterfaceCache) UnmarshalJSON(b []byte) error {
@@ -93,4 +106,45 @@ func (s *InterfaceCache) UnmarshalYAML(b []byte) error {
 
 func (s *InterfaceCache) MarshalYAML() ([]byte, error) {
 	return yaml.Marshal(s.v)
+}
+
+func (s *InterfaceCache) janitor() {
+	for {
+		time.Sleep(s.sleepInterval)
+		now := time.Now()
+		for _, k := range s.GetKeys() {
+			s.m.RLock()
+			if v, ok := s.v[k]; ok {
+				if v.deadline.Before(now) {
+					s.m.RUnlock()
+					s.unCache(k)
+				} else {
+					s.m.RUnlock()
+				}
+			} else {
+				s.m.RUnlock()
+			}
+		}
+	}
+}
+
+func (s *InterfaceCache) WithExpiration(e time.Duration) *InterfaceCache {
+	s.expire = e
+	if e >= 3*time.Second {
+		s.sleepInterval = e
+	} else {
+		s.sleepInterval = 3 * time.Second
+	}
+	go s.janitor()
+	return s
+}
+
+func (s *InterfaceCache) unCache(k string) (err error) {
+	s.m.Lock()
+	defer s.m.Unlock()
+	if s.persist {
+		err = s.db.Put(k, s.v[k].load())
+	}
+	delete(s.v, k)
+	return
 }
