@@ -148,3 +148,15 @@ func (s *InterfaceCache) unCache(k string) (err error) {
 	delete(s.v, k)
 	return
 }
+
+func (s *InterfaceCache) DispatchEvent(e func(interface{}) error) error {
+	var err error
+	s.m.Lock()
+	defer s.m.Unlock()
+	for _, v := range s.v {
+		if er := e(v); er != nil {
+			err = er
+		}
+	}
+	return err
+}
