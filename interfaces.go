@@ -14,3 +14,5 @@ type DB interface {
 	Exists(string) (bool, error)
 	Delete(string) error
 }
+
+type Dispatcher func(interface{}) error
