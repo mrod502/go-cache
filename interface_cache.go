@@ -15,6 +15,8 @@ type InterfaceCache struct {
 	persist       bool
 	expire        time.Duration
 	sleepInterval time.Duration
+	writeQ        chan action
+	waitForRes    bool
 }
 
 //Get a value
@@ -24,39 +26,56 @@ func (s *InterfaceCache) Get(k string) interface{} {
 	if v, ok := s.v[k]; ok {
 		return v.load()
 	}
-	return nil
+	return (<-s.aGet(k)).res
 }
 
 //Set a value
-func (s *InterfaceCache) Set(k string, v interface{}) {
+func (s *InterfaceCache) Set(k string, v interface{}) error {
 	s.m.RLock()
 	if val, ok := s.v[k]; ok {
 		val.store(v)
 		s.m.RUnlock()
-		return
+		return nil
 	}
 	s.m.RUnlock()
 	s.m.Lock()
 	defer s.m.Unlock()
 	s.v[k] = s.newContainer(v)
+
+	if s.persist {
+		res := s.aPut(k, v)
+		if s.waitForRes {
+			return (<-res).err
+		}
+	}
+	return nil
 }
 
 func (s *InterfaceCache) Exists(k string) bool {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	_, ok := s.v[k]
-	return ok
+	if ok || !s.persist {
+		return ok
+	}
+	return (<-s.aExists(k)).res.(bool)
 }
 
 //Delete a value
-func (s *InterfaceCache) Delete(k string) {
+func (s *InterfaceCache) Delete(k string) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
-
+	if s.persist {
+		res := s.aDelete(k)
+		if s.waitForRes {
+			err = (<-res).err
+		}
+	}
+	return
 }
 
-func (s *InterfaceCache) GetKeys() (out []string) {
+func (s *InterfaceCache) GetKeys(fromDb ...bool) (out []string) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	out = make([]string, len(s.v))
@@ -64,6 +83,11 @@ func (s *InterfaceCache) GetKeys() (out []string) {
 	for k := range s.v {
 		out[i] = k
 		i++
+	}
+	if s.persist {
+		if Or(fromDb...) {
+			out = append(out, s.db.Keys()...)
+		}
 	}
 	return out
 }
@@ -87,18 +111,18 @@ func (s *InterfaceCache) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
 }
 
-func (s *InterfaceCache) Query(q Qry, a QueryAppender) {
+func (s *InterfaceCache) Query(q Matcher) error {
 	for _, v := range s.GetKeys() {
-		if q.Match(s.Get(v)) {
-			if a(q) {
-				return
-			}
+		q(v)
+	}
+	if s.persist {
+		res := s.aQuery(q)
+		if s.waitForRes {
+			return (<-res).err
 		}
 	}
-
+	return nil
 }
-
-type QueryAppender func(v interface{}) bool
 
 func (s *InterfaceCache) UnmarshalYAML(b []byte) error {
 	return yaml.Unmarshal(b, &s.v)
@@ -128,6 +152,36 @@ func (s *InterfaceCache) janitor() {
 	}
 }
 
+func (s *InterfaceCache) WithDb(d DB) *InterfaceCache {
+	s.persist = true
+	s.db = d
+	go s.writer()
+	return s
+}
+
+func (s *InterfaceCache) writer() {
+	var res actionResponse
+	for {
+		action := <-s.writeQ
+		switch action.act {
+		case actionGet:
+			res.res, res.err = s.db.Get(action.k)
+		case actionPut:
+			res.err = s.db.Put(action.k, action.v)
+		case actionExist:
+			res.res, res.err = s.db.Exists(action.k)
+		case actionDelete:
+			res.err = s.db.Delete(action.k)
+		case actionQuery:
+			res.res, res.err = s.db.Where(action.qry)
+		}
+		if action.wantRes {
+			action.resChan <- res
+			close(action.resChan)
+		}
+	}
+}
+
 func (s *InterfaceCache) WithExpiration(e time.Duration) *InterfaceCache {
 	s.expire = e
 	if e >= 3*time.Second {
@@ -143,7 +197,10 @@ func (s *InterfaceCache) unCache(k string) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	if s.persist {
-		err = s.db.Put(k, s.v[k].load())
+		res := s.aPut(k, s.v[k].load())
+		if s.waitForRes {
+			err = (<-res).err
+		}
 	}
 	delete(s.v, k)
 	return
@@ -159,4 +216,60 @@ func (s *InterfaceCache) DispatchEvent(e func(interface{}) error) error {
 		}
 	}
 	return err
+}
+
+func (s *InterfaceCache) aGet(k string) chan actionResponse {
+	ch := make(chan actionResponse)
+	s.writeQ <- action{
+		act:     actionGet,
+		k:       k,
+		wantRes: true,
+		resChan: ch,
+	}
+	return ch
+}
+
+func (s *InterfaceCache) aPut(k string, v interface{}) chan actionResponse {
+	ch := make(chan actionResponse)
+	s.writeQ <- action{
+		act:     actionPut,
+		k:       k,
+		v:       v,
+		wantRes: s.waitForRes,
+		resChan: ch,
+	}
+	return ch
+}
+
+func (s *InterfaceCache) aDelete(k string) chan actionResponse {
+	ch := make(chan actionResponse)
+	s.writeQ <- action{
+		act:     actionDelete,
+		k:       k,
+		wantRes: s.waitForRes,
+		resChan: ch,
+	}
+	return ch
+}
+
+func (s *InterfaceCache) aExists(k string) chan actionResponse {
+	ch := make(chan actionResponse)
+	s.writeQ <- action{
+		act:     actionExist,
+		k:       k,
+		wantRes: true,
+		resChan: ch,
+	}
+	return ch
+}
+
+func (s *InterfaceCache) aQuery(q Matcher) chan actionResponse {
+	ch := make(chan actionResponse)
+	s.writeQ <- action{
+		act:     actionQuery,
+		qry:     q,
+		wantRes: s.waitForRes,
+		resChan: ch,
+	}
+	return ch
 }

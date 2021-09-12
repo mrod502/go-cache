@@ -2,14 +2,9 @@ package gocache
 
 import (
 	"encoding/json"
-	"errors"
 	"sync"
 
 	"gopkg.in/yaml.v3"
-)
-
-var (
-	ErrKey = errors.New("key not found")
 )
 
 type StringCache struct {

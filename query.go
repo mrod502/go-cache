@@ -22,6 +22,8 @@ const (
 	Regex
 )
 
+type Matcher func(v interface{}) bool
+
 func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 	return TimeQuery{
 		V:     v,
@@ -343,7 +345,7 @@ func (q BoolQuery) Match(i interface{}) bool {
 	}
 }
 
-func AND(v ...bool) bool {
+func And(v ...bool) bool {
 	for _, val := range v {
 		if !val {
 			return false
@@ -352,7 +354,7 @@ func AND(v ...bool) bool {
 	return true
 }
 
-func OR(v ...bool) bool {
+func Or(v ...bool) bool {
 	for _, val := range v {
 		if val {
 			return true
