@@ -17,7 +17,10 @@ type BoolCache struct {
 func (s *BoolCache) Get(k string) (v bool) {
 	s.m.RLock()
 	defer s.m.RUnlock()
-	return s.v[k].Load()
+	if v, ok := s.v[k]; ok {
+		return v.Load()
+	}
+	return false
 }
 
 //Set a value
