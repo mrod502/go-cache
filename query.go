@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrInterfaceAssertion error = errors.New("interface type assertion failed")
+	ErrNotFound           error = errors.New("not found")
 )
 
 const (
