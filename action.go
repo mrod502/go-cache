@@ -13,13 +13,15 @@ const (
 type action struct {
 	act     actionType
 	k       string
-	v       interface{}
+	v       Object
 	qry     Matcher
 	wantRes bool
 	resChan chan actionResponse
 }
 
 type actionResponse struct {
-	err error
-	res interface{}
+	err   error
+	res   Object
+	qRes  []Object
+	exist bool
 }

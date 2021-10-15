@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type InterfaceCache struct {
+type ItemCache struct {
 	m             *sync.RWMutex
 	v             map[string]*container
 	db            DB
@@ -19,8 +19,13 @@ type InterfaceCache struct {
 	waitForRes    bool
 }
 
+type Object interface {
+	Create() error
+	Destroy() error
+}
+
 //Get a value
-func (s *InterfaceCache) Get(k string) interface{} {
+func (s *ItemCache) Get(k string) Object {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	if v, ok := s.v[k]; ok {
@@ -29,8 +34,31 @@ func (s *InterfaceCache) Get(k string) interface{} {
 	return (<-s.aGet(k)).res
 }
 
+func (s *ItemCache) Where(m Matcher) (v []Object, err error) {
+	if !s.persist {
+		return s.memQuery(m)
+	}
+	return s.dbQuery(m)
+}
+
+func (s *ItemCache) memQuery(m Matcher) (v []Object, err error) {
+	s.m.RLock()
+	defer s.m.RUnlock()
+	for _, k := range s.GetKeys() {
+		val := s.v[k].load()
+		if m(val) {
+			v = append(v, val)
+		}
+	}
+	return
+}
+
+func (s *ItemCache) dbQuery(m Matcher) (v []Object, err error) {
+	return s.db.Where(m)
+}
+
 //Set a value
-func (s *InterfaceCache) Set(k string, v interface{}) error {
+func (s *ItemCache) Set(k string, v Object) error {
 	s.m.RLock()
 	if val, ok := s.v[k]; ok {
 		val.store(v)
@@ -51,18 +79,18 @@ func (s *InterfaceCache) Set(k string, v interface{}) error {
 	return nil
 }
 
-func (s *InterfaceCache) Exists(k string) bool {
+func (s *ItemCache) Exists(k string) bool {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	_, ok := s.v[k]
 	if ok || !s.persist {
 		return ok
 	}
-	return (<-s.aExists(k)).res.(bool)
+	return (<-s.aExists(k)).exist
 }
 
 //Delete a value
-func (s *InterfaceCache) Delete(k string) (err error) {
+func (s *ItemCache) Delete(k string) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
@@ -75,7 +103,7 @@ func (s *InterfaceCache) Delete(k string) (err error) {
 	return
 }
 
-func (s *InterfaceCache) GetKeys(fromDb ...bool) (out []string) {
+func (s *ItemCache) GetKeys(fromDb ...bool) (out []string) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	out = make([]string, len(s.v))
@@ -92,47 +120,34 @@ func (s *InterfaceCache) GetKeys(fromDb ...bool) (out []string) {
 	return out
 }
 
-func NewInterfaceCache(m ...map[string]interface{}) (s *InterfaceCache) {
+func NewItemCache(m ...map[string]Object) (s *ItemCache) {
 	if len(m) > 0 {
-		s = &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]*container)}
+		s = &ItemCache{m: new(sync.RWMutex), v: make(map[string]*container)}
 		for k, v := range m[0] {
 			s.Set(k, v)
 		}
 		return s
 	}
-	return &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]*container)}
+	return &ItemCache{m: new(sync.RWMutex), v: make(map[string]*container)}
 }
 
-func (s *InterfaceCache) UnmarshalJSON(b []byte) error {
+func (s *ItemCache) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &s.v)
 }
 
-func (s *InterfaceCache) MarshalJSON() ([]byte, error) {
+func (s *ItemCache) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
 }
 
-func (s *InterfaceCache) Query(q Matcher) error {
-	for _, v := range s.GetKeys() {
-		q(v)
-	}
-	if s.persist {
-		res := s.aQuery(q)
-		if s.waitForRes {
-			return (<-res).err
-		}
-	}
-	return nil
-}
-
-func (s *InterfaceCache) UnmarshalYAML(b []byte) error {
+func (s *ItemCache) UnmarshalYAML(b []byte) error {
 	return yaml.Unmarshal(b, &s.v)
 }
 
-func (s *InterfaceCache) MarshalYAML() ([]byte, error) {
+func (s *ItemCache) MarshalYAML() ([]byte, error) {
 	return yaml.Marshal(s.v)
 }
 
-func (s *InterfaceCache) janitor() {
+func (s *ItemCache) janitor() {
 	for {
 		time.Sleep(s.sleepInterval)
 		now := time.Now()
@@ -152,14 +167,14 @@ func (s *InterfaceCache) janitor() {
 	}
 }
 
-func (s *InterfaceCache) WithDb(d DB) *InterfaceCache {
+func (s *ItemCache) WithDb(d DB) *ItemCache {
 	s.persist = true
 	s.db = d
 	go s.writer()
 	return s
 }
 
-func (s *InterfaceCache) writer() {
+func (s *ItemCache) writer() {
 	var res actionResponse
 	for {
 		action := <-s.writeQ
@@ -169,11 +184,11 @@ func (s *InterfaceCache) writer() {
 		case actionPut:
 			res.err = s.db.Put(action.k, action.v)
 		case actionExist:
-			res.res, res.err = s.db.Exists(action.k)
+			res.exist, res.err = s.db.Exists(action.k)
 		case actionDelete:
 			res.err = s.db.Delete(action.k)
 		case actionQuery:
-			res.res, res.err = s.db.Where(action.qry)
+			res.qRes, res.err = s.db.Where(action.qry)
 		}
 		if action.wantRes {
 			action.resChan <- res
@@ -182,7 +197,7 @@ func (s *InterfaceCache) writer() {
 	}
 }
 
-func (s *InterfaceCache) WithExpiration(e time.Duration) *InterfaceCache {
+func (s *ItemCache) WithExpiration(e time.Duration) *ItemCache {
 	s.expire = e
 	if e >= 3*time.Second {
 		s.sleepInterval = e
@@ -193,7 +208,7 @@ func (s *InterfaceCache) WithExpiration(e time.Duration) *InterfaceCache {
 	return s
 }
 
-func (s *InterfaceCache) unCache(k string) (err error) {
+func (s *ItemCache) unCache(k string) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	if s.persist {
@@ -206,19 +221,19 @@ func (s *InterfaceCache) unCache(k string) (err error) {
 	return
 }
 
-func (s *InterfaceCache) DispatchEvent(e func(interface{}) error) error {
+func (s *ItemCache) DispatchEvent(e func(Item) error) error {
 	var err error
 	s.m.Lock()
 	defer s.m.Unlock()
 	for _, v := range s.v {
-		if er := e(v); er != nil {
+		if er := e(v.load()); er != nil {
 			err = er
 		}
 	}
 	return err
 }
 
-func (s *InterfaceCache) aGet(k string) chan actionResponse {
+func (s *ItemCache) aGet(k string) chan actionResponse {
 	ch := make(chan actionResponse)
 	s.writeQ <- action{
 		act:     actionGet,
@@ -229,7 +244,7 @@ func (s *InterfaceCache) aGet(k string) chan actionResponse {
 	return ch
 }
 
-func (s *InterfaceCache) aPut(k string, v interface{}) chan actionResponse {
+func (s *ItemCache) aPut(k string, v Object) chan actionResponse {
 	ch := make(chan actionResponse)
 	s.writeQ <- action{
 		act:     actionPut,
@@ -241,7 +256,7 @@ func (s *InterfaceCache) aPut(k string, v interface{}) chan actionResponse {
 	return ch
 }
 
-func (s *InterfaceCache) aDelete(k string) chan actionResponse {
+func (s *ItemCache) aDelete(k string) chan actionResponse {
 	ch := make(chan actionResponse)
 	s.writeQ <- action{
 		act:     actionDelete,
@@ -252,7 +267,7 @@ func (s *InterfaceCache) aDelete(k string) chan actionResponse {
 	return ch
 }
 
-func (s *InterfaceCache) aExists(k string) chan actionResponse {
+func (s *ItemCache) aExists(k string) chan actionResponse {
 	ch := make(chan actionResponse)
 	s.writeQ <- action{
 		act:     actionExist,
@@ -263,7 +278,7 @@ func (s *InterfaceCache) aExists(k string) chan actionResponse {
 	return ch
 }
 
-func (s *InterfaceCache) aQuery(q Matcher) chan actionResponse {
+func (s *ItemCache) aQuery(q Matcher) chan actionResponse {
 	ch := make(chan actionResponse)
 	s.writeQ <- action{
 		act:     actionQuery,

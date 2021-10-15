@@ -1,16 +1,19 @@
 package gocache
 
-type Qry interface {
-	Match(interface{}) bool
+type Item interface {
+	//Create creates any resources that relate to an initialized Item
+	Create() error
+	//Destroy removes any resources created by Item.Create()
+	Destroy() error
 }
 
 type DB interface {
-	Get(string) (interface{}, error)
-	Put(string, interface{}) error
+	Get(string) (Object, error)
+	Put(string, Object) error
 	Exists(string) (bool, error)
 	Delete(string) error
-	Where(Matcher) (interface{}, error)
+	Where(Matcher) ([]Object, error)
 	Keys() []string
 }
 
-type Dispatcher func(interface{}) error
+type Dispatcher func(Item) error

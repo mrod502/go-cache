@@ -7,23 +7,23 @@ import (
 
 type container struct {
 	*sync.RWMutex
-	v        interface{}
+	v        Object
 	deadline time.Time
 }
 
-func (c *container) load() interface{} {
+func (c *container) load() Object {
 	c.RLock()
 	defer c.RUnlock()
 	return c.v
 }
 
-func (c *container) store(v interface{}) {
+func (c *container) store(v Object) {
 	c.Lock()
 	defer c.Unlock()
 	c.v = v
 }
 
-func (s *InterfaceCache) newContainer(v interface{}) *container {
+func (s *ItemCache) newContainer(v Object) *container {
 	return &container{
 		RWMutex:  new(sync.RWMutex),
 		v:        v,
