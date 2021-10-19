@@ -25,13 +25,14 @@ type Object interface {
 }
 
 //Get a value
-func (s *ItemCache) Get(k string) Object {
+func (s *ItemCache) Get(k string) (Object, error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	if v, ok := s.v[k]; ok {
-		return v.load()
+		return v.load(), nil
 	}
-	return (<-s.aGet(k)).res
+	r := <-s.aGet(k)
+	return r.res, r.err
 }
 
 func (s *ItemCache) Where(m Matcher) (v []Object, err error) {
@@ -91,16 +92,21 @@ func (s *ItemCache) Exists(k string) bool {
 
 //Delete a value
 func (s *ItemCache) Delete(k string) (err error) {
+	v, err := s.Get(k)
+	if err != nil {
+		return err
+	}
+	defer v.Destroy()
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
 	if s.persist {
 		res := s.aDelete(k)
 		if s.waitForRes {
-			err = (<-res).err
+			return (<-res).err
 		}
 	}
-	return
+	return nil
 }
 
 func (s *ItemCache) GetKeys(fromDb ...bool) (out []string) {
@@ -129,22 +135,6 @@ func NewItemCache(m ...map[string]Object) (s *ItemCache) {
 		return s
 	}
 	return &ItemCache{m: new(sync.RWMutex), v: make(map[string]*container)}
-}
-
-func (s *ItemCache) UnmarshalJSON(b []byte) error {
-	return json.Unmarshal(b, &s.v)
-}
-
-func (s *ItemCache) MarshalJSON() ([]byte, error) {
-	return json.Marshal(s.v)
-}
-
-func (s *ItemCache) UnmarshalYAML(b []byte) error {
-	return yaml.Unmarshal(b, &s.v)
-}
-
-func (s *ItemCache) MarshalYAML() ([]byte, error) {
-	return yaml.Marshal(s.v)
 }
 
 func (s *ItemCache) janitor() {
@@ -199,10 +189,10 @@ func (s *ItemCache) writer() {
 
 func (s *ItemCache) WithExpiration(e time.Duration) *ItemCache {
 	s.expire = e
-	if e >= 3*time.Second {
+	if e > (30 * time.Second) {
 		s.sleepInterval = e
 	} else {
-		s.sleepInterval = 3 * time.Second
+		s.sleepInterval = 30 * time.Second
 	}
 	go s.janitor()
 	return s
@@ -287,4 +277,20 @@ func (s *ItemCache) aQuery(q Matcher) chan actionResponse {
 		resChan: ch,
 	}
 	return ch
+}
+
+func (s *ItemCache) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &s.v)
+}
+
+func (s *ItemCache) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.v)
+}
+
+func (s *ItemCache) UnmarshalYAML(b []byte) error {
+	return yaml.Unmarshal(b, &s.v)
+}
+
+func (s *ItemCache) MarshalYAML() ([]byte, error) {
+	return yaml.Marshal(s.v)
 }
