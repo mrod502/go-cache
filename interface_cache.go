@@ -16,7 +16,7 @@ type InterfaceCache struct {
 	writeQ        chan action
 }
 
-//Get a value
+//Get a value --
 func (s *InterfaceCache) Get(k string) (interface{}, error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
