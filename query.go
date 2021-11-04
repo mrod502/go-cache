@@ -88,13 +88,27 @@ type IntQuery struct {
 }
 
 func (q IntQuery) Match(i interface{}) bool {
-	v, ok := i.(int)
-	if !ok {
-		return false
-	}
 	if !q.Check {
 		return true
 	}
+
+	switch val := i.(type) {
+	case int:
+		return q.cmp(val)
+	case []int:
+		for _, v := range val {
+			if q.cmp(v) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+
+}
+
+func (q IntQuery) cmp(v int) bool {
 	switch q.C {
 	case Greater:
 		return v > q.V
@@ -182,13 +196,25 @@ type StringQuery struct {
 }
 
 func (q StringQuery) Match(i interface{}) bool {
-	v, ok := i.(string)
-	if !ok {
-		return false
-	}
 	if !q.Check {
 		return true
 	}
+	switch v := i.(type) {
+	case string:
+		return q.cmp(v)
+	case []string:
+		for _, val := range v {
+			if q.cmp(val) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func (q StringQuery) cmp(v string) bool {
 	switch q.C {
 	case Greater:
 		return v > q.V
@@ -267,13 +293,25 @@ type ByteSliceQuery struct {
 }
 
 func (q ByteSliceQuery) Match(i interface{}) bool {
-	v, ok := i.([]byte)
-	if !ok {
-		return false
-	}
 	if !q.Check {
 		return true
 	}
+	switch val := i.(type) {
+	case []byte:
+		return q.cmp(val)
+	case [][]byte:
+		for _, v := range val {
+			if q.cmp(v) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func (q ByteSliceQuery) cmp(v []byte) bool {
 	switch q.C {
 	case Greater:
 		return string(v) > string(q.V)
@@ -295,14 +333,6 @@ func (q ByteSliceQuery) Match(i interface{}) bool {
 	default:
 		return bytes.Equal(q.V, v)
 	}
-}
-func (q ByteSliceQuery) MatchVec(v [][]byte) bool {
-	for _, val := range v {
-		if q.Match(val) {
-			return true
-		}
-	}
-	return false
 }
 
 func NewBoolQuery(v bool, c byte) BoolQuery {
