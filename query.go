@@ -22,6 +22,8 @@ const (
 	Regex
 )
 
+type Matcher func(v Object) bool
+
 func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 	return TimeQuery{
 		V:     v,
