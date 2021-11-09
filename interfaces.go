@@ -1,7 +1,7 @@
 package gocache
 
 type DB interface {
-	Get(string) (Object, error)
+	Get(string) ([]byte, error)
 	Put(string, Object) error
 	Exists(string) (bool, error)
 	Delete(string) error

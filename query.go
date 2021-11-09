@@ -22,7 +22,7 @@ const (
 	Regex
 )
 
-type Matcher func(v Object) bool
+type Matcher func(v interface{}) bool
 
 func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 	return TimeQuery{
@@ -182,13 +182,24 @@ type StringQuery struct {
 }
 
 func (q StringQuery) Match(i interface{}) bool {
-	v, ok := i.(string)
-	if !ok {
-		return false
-	}
+
 	if !q.Check {
 		return true
 	}
+	switch v := i.(type) {
+	case string:
+		return q.match(v)
+	case []string:
+		for _, val := range v {
+			if q.match(val) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (q StringQuery) match(v string) bool {
 	switch q.C {
 	case Greater:
 		return v > q.V
@@ -267,13 +278,23 @@ type ByteSliceQuery struct {
 }
 
 func (q ByteSliceQuery) Match(i interface{}) bool {
-	v, ok := i.([]byte)
-	if !ok {
-		return false
-	}
 	if !q.Check {
 		return true
 	}
+	switch val := i.(type) {
+	case []byte:
+		return q.match(val)
+	case [][]byte:
+		for _, v := range val {
+			if q.match(v) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (q ByteSliceQuery) match(v []byte) bool {
 	switch q.C {
 	case Greater:
 		return string(v) > string(q.V)
@@ -295,14 +316,6 @@ func (q ByteSliceQuery) Match(i interface{}) bool {
 	default:
 		return bytes.Equal(q.V, v)
 	}
-}
-func (q ByteSliceQuery) MatchVec(v [][]byte) bool {
-	for _, val := range v {
-		if q.Match(val) {
-			return true
-		}
-	}
-	return false
 }
 
 func NewBoolQuery(v bool, c byte) BoolQuery {

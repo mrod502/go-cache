@@ -170,7 +170,7 @@ func (s *ObjectCache) writer() {
 		action := <-s.writeQ
 		switch action.act {
 		case actionGet:
-			res.res, res.err = s.db.Get(action.k)
+
 		case actionPut:
 			res.err = s.db.Put(action.k, action.v)
 		case actionExist:
