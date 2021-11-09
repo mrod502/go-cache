@@ -1,5 +1,6 @@
 package gocache
 
+// a db
 type DB interface {
 	Get(string) (Object, error)
 	Put(string, Object) error

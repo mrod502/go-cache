@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	ErrInterfaceAssertion error = errors.New("interface type assertion failed")
+	ErrInterfaceAssertion error = errors.New("interface type-assertion failed")
 )
 
 const (
@@ -36,8 +36,8 @@ func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 type TimeQuery struct {
 	V     time.Time
 	C     byte
-	S     string
-	Check bool `msgpack:"chk"`
+	S     string `msgpack:"S"`
+	Check bool   `msgpack:"chk"`
 }
 
 func (q TimeQuery) Match(i interface{}) bool {
@@ -387,4 +387,3 @@ func And(v ...bool) bool {
 	}
 	return true
 }
-

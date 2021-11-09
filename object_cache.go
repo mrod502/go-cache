@@ -24,7 +24,6 @@ type Object interface {
 	Destroy() error
 }
 
-//Get a value
 func (s *ObjectCache) Get(k string) (Object, error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
