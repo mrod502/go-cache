@@ -88,13 +88,27 @@ type IntQuery struct {
 }
 
 func (q IntQuery) Match(i interface{}) bool {
-	v, ok := i.(int)
-	if !ok {
-		return false
-	}
 	if !q.Check {
 		return true
 	}
+
+	switch val := i.(type) {
+	case int:
+		return q.cmp(val)
+	case []int:
+		for _, v := range val {
+			if q.cmp(v) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+
+}
+
+func (q IntQuery) cmp(v int) bool {
 	switch q.C {
 	case Greater:
 		return v > q.V
@@ -182,7 +196,6 @@ type StringQuery struct {
 }
 
 func (q StringQuery) Match(i interface{}) bool {
-
 	if !q.Check {
 		return true
 	}
