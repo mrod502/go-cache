@@ -371,6 +371,14 @@ func (q BoolQuery) Match(i interface{}) bool {
 	}
 }
 
+func Or(v ...bool) bool {
+	for _, val := range v {
+		if val {
+			return true
+		}
+	}
+	return false
+}
 func And(v ...bool) bool {
 	for _, val := range v {
 		if !val {
@@ -380,11 +388,3 @@ func And(v ...bool) bool {
 	return true
 }
 
-func Or(v ...bool) bool {
-	for _, val := range v {
-		if val {
-			return true
-		}
-	}
-	return false
-}
