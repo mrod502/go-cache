@@ -3,7 +3,6 @@ package gocache
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"regexp"
 	"time"
 )
@@ -33,7 +32,6 @@ func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 	return TimeQuery{
 		V:     v,
 		C:     c,
-		S:     rex,
 		Check: true,
 	}
 }
@@ -41,8 +39,7 @@ func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 type TimeQuery struct {
 	V     time.Time
 	C     byte
-	S     string `msgpack:"S"`
-	Check bool   `msgpack:"chk"`
+	Check bool `msgpack:"chk"`
 }
 
 func (q TimeQuery) Match(i interface{}) bool {
@@ -60,15 +57,6 @@ func (q TimeQuery) Match(i interface{}) bool {
 		return v.UnixNano() >= q.V.UnixNano()
 	case LessEq:
 		return v.UnixNano() <= q.V.UnixNano()
-	case Regex:
-		if len(q.S) == 0 {
-			return q.V == v
-		}
-		rex, err := regexp.Compile(q.S)
-		if err != nil {
-			return false
-		}
-		return len(rex.FindString(v.Format("2006-01-02 15:04:05.999"))) > 0
 	case Neq:
 		return q.V != v
 	default:
@@ -80,7 +68,6 @@ func NewIntQuery(v int, c byte, rex string) IntQuery {
 	return IntQuery{
 		V:     v,
 		C:     c,
-		S:     rex,
 		Check: true,
 	}
 }
@@ -88,7 +75,6 @@ func NewIntQuery(v int, c byte, rex string) IntQuery {
 type IntQuery struct {
 	V     int
 	C     byte
-	S     string
 	Check bool `msgpack:"chk"`
 }
 
@@ -121,15 +107,6 @@ func (q IntQuery) cmp(v int) bool {
 		return v >= q.V
 	case LessEq:
 		return v <= q.V
-	case Regex:
-		if len(q.S) == 0 {
-			return q.V == v
-		}
-		rex, err := regexp.Compile(q.S)
-		if err != nil {
-			return false
-		}
-		return len(rex.FindString(fmt.Sprintf("%d", v))) > 0
 	case Neq:
 		return q.V != v
 	default:
@@ -141,7 +118,6 @@ func NewFloatQuery(v float64, c byte, rex string) FloatQuery {
 	return FloatQuery{
 		V:     v,
 		C:     c,
-		S:     rex,
 		Check: true,
 	}
 }
@@ -149,7 +125,6 @@ func NewFloatQuery(v float64, c byte, rex string) FloatQuery {
 type FloatQuery struct {
 	V     float64
 	C     byte
-	S     string
 	Check bool `msgpack:"chk"`
 }
 
@@ -168,15 +143,6 @@ func (q FloatQuery) Match(i interface{}) bool {
 		return v >= q.V
 	case LessEq:
 		return v <= q.V
-	case Regex:
-		if len(q.S) == 0 {
-			return q.V == v
-		}
-		rex, err := regexp.Compile(q.S)
-		if err != nil {
-			return false
-		}
-		return len(rex.FindString(fmt.Sprintf("%.4f", v))) > 0
 	case Neq:
 		return q.V != v
 	default:
@@ -188,7 +154,6 @@ func NewStringQuery(v string, c byte, rex string) StringQuery {
 	return StringQuery{
 		V:     v,
 		C:     c,
-		S:     rex,
 		Check: true,
 	}
 }
@@ -196,7 +161,6 @@ func NewStringQuery(v string, c byte, rex string) StringQuery {
 type StringQuery struct {
 	V     string
 	C     byte
-	S     string
 	Check bool `msgpack:"chk"`
 }
 
@@ -226,10 +190,10 @@ func (q StringQuery) match(v string) bool {
 	case LessEq:
 		return v <= q.V
 	case Regex:
-		if len(q.S) == 0 {
+		if len(q.V) == 0 {
 			return q.V == v
 		}
-		rex, err := regexp.Compile(q.S)
+		rex, err := regexp.Compile(q.V)
 		if err != nil {
 			return false
 		}
@@ -270,8 +234,6 @@ func (q ByteQuery) Match(i interface{}) bool {
 		return v >= q.V
 	case LessEq:
 		return v <= q.V
-	case Regex:
-		return q.V == v
 	case Neq:
 		return q.V != v
 	default:
@@ -283,7 +245,6 @@ func NewByteSliceQuery(v []byte, c byte, rex string) ByteSliceQuery {
 	return ByteSliceQuery{
 		V:     v,
 		C:     c,
-		S:     rex,
 		Check: true,
 	}
 }
@@ -291,7 +252,6 @@ func NewByteSliceQuery(v []byte, c byte, rex string) ByteSliceQuery {
 type ByteSliceQuery struct {
 	V     []byte
 	C     byte
-	S     string
 	Check bool `msgpack:"chk"`
 }
 
@@ -321,10 +281,10 @@ func (q ByteSliceQuery) match(v []byte) bool {
 	case LessEq:
 		return string(v) <= string(q.V)
 	case Regex:
-		if len(q.S) == 0 {
+		if len(q.V) == 0 {
 			return bytes.Equal(q.V, v)
 		}
-		rex, err := regexp.Compile(q.S)
+		rex, err := regexp.Compile(string(q.V))
 		if err != nil {
 			return false
 		}
@@ -365,8 +325,6 @@ func (q BoolQuery) Match(i interface{}) bool {
 		return v
 	case LessEq:
 		return !v
-	case Regex:
-		return v
 	case Neq:
 		return v != q.V
 	case Eq:
