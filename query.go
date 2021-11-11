@@ -22,7 +22,12 @@ const (
 	Regex
 )
 
-type Matcher func(v Object) bool
+type MatchFunc func(v Object) bool
+
+type Matcher interface {
+	Match(Object) bool
+	GetLimit() uint
+}
 
 func NewTimeQuery(v time.Time, c byte, rex string) TimeQuery {
 	return TimeQuery{

@@ -44,10 +44,15 @@ func (s *ObjectCache) Where(m Matcher) (v []Object, err error) {
 func (s *ObjectCache) memQuery(m Matcher) (v []Object, err error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
+	var matches uint
 	for _, k := range s.GetKeys() {
 		val := s.v[k].load()
-		if m(val) {
+		if m.Match(val) {
+			matches++
 			v = append(v, val)
+		}
+		if matches >= m.GetLimit() {
+			return
 		}
 	}
 	return
