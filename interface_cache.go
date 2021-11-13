@@ -23,6 +23,7 @@ func (s *InterfaceCache) Get(k string) (interface{}, error) {
 	if v, ok := s.v[k]; ok {
 		return v.load(), nil
 	}
+	return nil, ErrKey
 	r := <-s.aGet(k)
 	return r.res, r.err
 }
