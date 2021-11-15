@@ -13,7 +13,6 @@ type InterfaceCache struct {
 	v             map[string]*icontainer
 	expire        time.Duration
 	sleepInterval time.Duration
-	writeQ        chan action
 }
 
 //Get a value --
@@ -24,8 +23,6 @@ func (s *InterfaceCache) Get(k string) (interface{}, error) {
 		return v.load(), nil
 	}
 	return nil, ErrKey
-	r := <-s.aGet(k)
-	return r.res, r.err
 }
 
 func (s *InterfaceCache) Where(m func(interface{}) bool) (v []interface{}, err error) {
@@ -147,17 +144,6 @@ func (s *InterfaceCache) DispatchEvent(e func(interface{}) error) error {
 		}
 	}
 	return err
-}
-
-func (s *InterfaceCache) aGet(k string) chan actionResponse {
-	ch := make(chan actionResponse)
-	s.writeQ <- action{
-		act:     actionGet,
-		k:       k,
-		wantRes: true,
-		resChan: ch,
-	}
-	return ch
 }
 
 func (s *InterfaceCache) UnmarshalJSON(b []byte) error {
