@@ -37,20 +37,21 @@ type Cache[T any] struct {
 }
 
 //Get a value --
-func (s *Cache[T]) Get(k string) (interface{}, error) {
+func (s *Cache[T]) Get(k string) (t T, err error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	if v, ok := s.v[k]; ok {
 		return v.load(), nil
 	}
-	return nil, ErrKey
+	return t, ErrKey
 }
 
-func (s *Cache[T]) Where(m func(interface{}) bool) (v []interface{}, err error) {
+func (s *Cache[T]) Where(m func(T) bool) (v []T, err error) {
 	return s.memQuery(m)
 }
 
-func (s *Cache[T]) memQuery(m func(interface{}) bool) (v []interface{}, err error) {
+func (s *Cache[T]) memQuery(m func(T) bool) (v []T, err error) {
+	v = make([]T, 0)
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range s.GetKeys() {
@@ -157,6 +158,30 @@ func (s *Cache[T]) unCache(k string) (err error) {
 	defer s.m.Unlock()
 	delete(s.v, k)
 	return
+}
+
+func (s *Cache[T]) Filter(f func(T) bool) map[string]T {
+	keys := s.GetKeys()
+	out := make(map[string]T)
+	s.m.RLock()
+	defer s.m.RUnlock()
+	for _, k := range keys {
+		value := s.v[k]
+		if f(value.load()) {
+			out[k] = value.load()
+		}
+	}
+	return out
+}
+
+func (s *Cache[T]) Values() []T {
+	out := make([]T, 0, len(s.v))
+	s.m.RLock()
+	defer s.m.RUnlock()
+	for _, k := range s.GetKeys() {
+		out = append(out, s.v[k].load())
+	}
+	return out
 }
 
 func (s *Cache[T]) UnmarshalJSON(b []byte) error {
