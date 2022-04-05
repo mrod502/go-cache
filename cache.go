@@ -8,15 +8,36 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type InterfaceCache struct {
+type container[T any] struct {
+	m        *sync.RWMutex
+	v        T
+	deadline time.Time
+}
+
+func (c *container[T]) load() T {
+	c.m.RLock()
+	defer c.m.RUnlock()
+	return c.v
+}
+func (c *container[T]) store(v T) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.v = v
+}
+
+type Stringer interface {
+	String() string
+}
+
+type Cache[T any] struct {
 	m             *sync.RWMutex
-	v             map[string]*icontainer
+	v             map[string]*container[T]
 	expire        time.Duration
 	sleepInterval time.Duration
 }
 
 //Get a value --
-func (s *InterfaceCache) Get(k string) (interface{}, error) {
+func (s *Cache[T]) Get(k string) (interface{}, error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	if v, ok := s.v[k]; ok {
@@ -25,11 +46,11 @@ func (s *InterfaceCache) Get(k string) (interface{}, error) {
 	return nil, ErrKey
 }
 
-func (s *InterfaceCache) Where(m func(interface{}) bool) (v []interface{}, err error) {
+func (s *Cache[T]) Where(m func(interface{}) bool) (v []interface{}, err error) {
 	return s.memQuery(m)
 }
 
-func (s *InterfaceCache) memQuery(m func(interface{}) bool) (v []interface{}, err error) {
+func (s *Cache[T]) memQuery(m func(interface{}) bool) (v []interface{}, err error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range s.GetKeys() {
@@ -42,7 +63,7 @@ func (s *InterfaceCache) memQuery(m func(interface{}) bool) (v []interface{}, er
 }
 
 //Set a value
-func (s *InterfaceCache) Set(k string, v interface{}) error {
+func (s *Cache[T]) Set(k string, v T) error {
 	s.m.RLock()
 	if val, ok := s.v[k]; ok {
 		val.store(v)
@@ -52,11 +73,11 @@ func (s *InterfaceCache) Set(k string, v interface{}) error {
 	s.m.RUnlock()
 	s.m.Lock()
 	defer s.m.Unlock()
-	s.v[k] = s.newiContainer(v)
+	s.v[k] = s.newContainer(v)
 	return nil
 }
 
-func (s *InterfaceCache) Exists(k string) bool {
+func (s *Cache[T]) Exists(k string) bool {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	_, ok := s.v[k]
@@ -64,7 +85,7 @@ func (s *InterfaceCache) Exists(k string) bool {
 }
 
 //Delete a value
-func (s *InterfaceCache) Delete(k string) (err error) {
+func (s *Cache[T]) Delete(k string) (err error) {
 
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -73,7 +94,7 @@ func (s *InterfaceCache) Delete(k string) (err error) {
 	return nil
 }
 
-func (s *InterfaceCache) GetKeys(fromDb ...bool) (out []string) {
+func (s *Cache[T]) GetKeys(fromDb ...bool) (out []string) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	out = make([]string, len(s.v))
@@ -85,18 +106,18 @@ func (s *InterfaceCache) GetKeys(fromDb ...bool) (out []string) {
 	return out
 }
 
-func NewInterfaceCache(m ...map[string]interface{}) (s *InterfaceCache) {
+func New[T any](m ...map[string]T) (s *Cache[T]) {
 	if len(m) > 0 {
-		s = &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]*icontainer)}
+		s = &Cache[T]{m: new(sync.RWMutex), v: make(map[string]*container[T])}
 		for k, v := range m[0] {
 			s.Set(k, v)
 		}
 		return s
 	}
-	return &InterfaceCache{m: new(sync.RWMutex), v: make(map[string]*icontainer)}
+	return &Cache[T]{m: new(sync.RWMutex), v: make(map[string]*container[T])}
 }
 
-func (s *InterfaceCache) janitor() {
+func (s *Cache[T]) janitor() {
 	for {
 		time.Sleep(s.sleepInterval)
 		now := time.Now()
@@ -116,7 +137,7 @@ func (s *InterfaceCache) janitor() {
 	}
 }
 
-func (s *InterfaceCache) WithExpiration(e time.Duration) *InterfaceCache {
+func (s *Cache[T]) WithExpiration(e time.Duration) *Cache[T] {
 	s.expire = e
 	if e > (30 * time.Second) {
 		s.sleepInterval = e
@@ -127,37 +148,29 @@ func (s *InterfaceCache) WithExpiration(e time.Duration) *InterfaceCache {
 	return s
 }
 
-func (s *InterfaceCache) unCache(k string) (err error) {
+func (c *Cache[T]) newContainer(v T) *container[T] {
+	return &container[T]{m: &sync.RWMutex{}, v: v, deadline: time.Now().Add(c.expire)}
+}
+
+func (s *Cache[T]) unCache(k string) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
 	return
 }
 
-func (s *InterfaceCache) DispatchEvent(e func(interface{}) error) error {
-	var err error
-	s.m.Lock()
-	defer s.m.Unlock()
-	for _, v := range s.v {
-		if er := e(v.load()); er != nil {
-			err = er
-		}
-	}
-	return err
-}
-
-func (s *InterfaceCache) UnmarshalJSON(b []byte) error {
+func (s *Cache[T]) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &s.v)
 }
 
-func (s *InterfaceCache) MarshalJSON() ([]byte, error) {
+func (s *Cache[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
 }
 
-func (s *InterfaceCache) UnmarshalYAML(b []byte) error {
+func (s *Cache[T]) UnmarshalYAML(b []byte) error {
 	return yaml.Unmarshal(b, &s.v)
 }
 
-func (s *InterfaceCache) MarshalYAML() ([]byte, error) {
+func (s *Cache[T]) MarshalYAML() ([]byte, error) {
 	return yaml.Marshal(s.v)
 }
