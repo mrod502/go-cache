@@ -8,18 +8,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type container[T any] struct {
+type Container[T any] struct {
 	m        *sync.RWMutex
 	v        T
 	deadline time.Time
 }
 
-func (c *container[T]) load() T {
+func (c *Container[T]) Load() T {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	return c.v
 }
-func (c *container[T]) store(v T) {
+func (c *Container[T]) Store(v T) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.v = v
@@ -29,33 +29,33 @@ type Stringer interface {
 	String() string
 }
 
-type Cache[T any] struct {
+type Cache[T any, K comparable] struct {
 	m             *sync.RWMutex
-	v             map[string]*container[T]
+	v             map[K]*Container[T]
 	expire        time.Duration
 	sleepInterval time.Duration
 }
 
 //Get a value --
-func (s *Cache[T]) Get(k string) (t T, err error) {
+func (s *Cache[T, V]) Get(k V) (t T, err error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	if v, ok := s.v[k]; ok {
-		return v.load(), nil
+		return v.Load(), nil
 	}
 	return t, ErrKey
 }
 
-func (s *Cache[T]) Where(m func(T) bool) (v []T, err error) {
+func (s *Cache[T, V]) Where(m func(T) bool) (v []T, err error) {
 	return s.memQuery(m)
 }
 
-func (s *Cache[T]) memQuery(m func(T) bool) (v []T, err error) {
+func (s *Cache[T, V]) memQuery(m func(T) bool) (v []T, err error) {
 	v = make([]T, 0)
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range s.GetKeys() {
-		val := s.v[k].load()
+		val := s.v[k].Load()
 		if m(val) {
 			v = append(v, val)
 		}
@@ -64,10 +64,10 @@ func (s *Cache[T]) memQuery(m func(T) bool) (v []T, err error) {
 }
 
 //Set a value
-func (s *Cache[T]) Set(k string, v T) error {
+func (s *Cache[T, V]) Set(k V, v T) error {
 	s.m.RLock()
 	if val, ok := s.v[k]; ok {
-		val.store(v)
+		val.Store(v)
 		s.m.RUnlock()
 		return nil
 	}
@@ -78,7 +78,7 @@ func (s *Cache[T]) Set(k string, v T) error {
 	return nil
 }
 
-func (s *Cache[T]) Exists(k string) bool {
+func (s *Cache[T, V]) Exists(k V) bool {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	_, ok := s.v[k]
@@ -86,7 +86,7 @@ func (s *Cache[T]) Exists(k string) bool {
 }
 
 //Delete a value
-func (s *Cache[T]) Delete(k string) (err error) {
+func (s *Cache[T, V]) Delete(k V) (err error) {
 
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -95,10 +95,10 @@ func (s *Cache[T]) Delete(k string) (err error) {
 	return nil
 }
 
-func (s *Cache[T]) GetKeys(fromDb ...bool) (out []string) {
+func (s *Cache[T, V]) GetKeys(fromDb ...bool) (out []V) {
 	s.m.RLock()
 	defer s.m.RUnlock()
-	out = make([]string, len(s.v))
+	out = make([]V, len(s.v))
 	var i int
 	for k := range s.v {
 		out[i] = k
@@ -107,18 +107,18 @@ func (s *Cache[T]) GetKeys(fromDb ...bool) (out []string) {
 	return out
 }
 
-func New[T any](m ...map[string]T) (s *Cache[T]) {
+func New[T any, V comparable](m ...map[V]T) (s *Cache[T, V]) {
 	if len(m) > 0 {
-		s = &Cache[T]{m: new(sync.RWMutex), v: make(map[string]*container[T])}
+		s = &Cache[T, V]{m: new(sync.RWMutex), v: make(map[V]*Container[T])}
 		for k, v := range m[0] {
 			s.Set(k, v)
 		}
 		return s
 	}
-	return &Cache[T]{m: new(sync.RWMutex), v: make(map[string]*container[T])}
+	return &Cache[T, V]{m: new(sync.RWMutex), v: make(map[V]*Container[T])}
 }
 
-func (s *Cache[T]) janitor() {
+func (s *Cache[T, V]) janitor() {
 	for {
 		time.Sleep(s.sleepInterval)
 		now := time.Now()
@@ -138,7 +138,7 @@ func (s *Cache[T]) janitor() {
 	}
 }
 
-func (s *Cache[T]) WithExpiration(e time.Duration) *Cache[T] {
+func (s *Cache[T, V]) WithExpiration(e time.Duration) *Cache[T, V] {
 	s.expire = e
 	if e > (30 * time.Second) {
 		s.sleepInterval = e
@@ -149,53 +149,53 @@ func (s *Cache[T]) WithExpiration(e time.Duration) *Cache[T] {
 	return s
 }
 
-func (c *Cache[T]) newContainer(v T) *container[T] {
-	return &container[T]{m: &sync.RWMutex{}, v: v, deadline: time.Now().Add(c.expire)}
+func (c *Cache[T, V]) newContainer(v T) *Container[T] {
+	return &Container[T]{m: &sync.RWMutex{}, v: v, deadline: time.Now().Add(c.expire)}
 }
 
-func (s *Cache[T]) unCache(k string) (err error) {
+func (s *Cache[T, V]) unCache(k V) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
 	return
 }
 
-func (s *Cache[T]) Filter(f func(T) bool) map[string]T {
+func (s *Cache[T, V]) Filter(f func(T) bool) map[V]T {
 	keys := s.GetKeys()
-	out := make(map[string]T)
+	out := make(map[V]T)
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range keys {
 		value := s.v[k]
-		if f(value.load()) {
-			out[k] = value.load()
+		if f(value.Load()) {
+			out[k] = value.Load()
 		}
 	}
 	return out
 }
 
-func (s *Cache[T]) Values() []T {
+func (s *Cache[T, V]) Values() []T {
 	out := make([]T, 0, len(s.v))
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range s.GetKeys() {
-		out = append(out, s.v[k].load())
+		out = append(out, s.v[k].Load())
 	}
 	return out
 }
 
-func (s *Cache[T]) UnmarshalJSON(b []byte) error {
+func (s *Cache[T, V]) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &s.v)
 }
 
-func (s *Cache[T]) MarshalJSON() ([]byte, error) {
+func (s *Cache[T, V]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
 }
 
-func (s *Cache[T]) UnmarshalYAML(b []byte) error {
+func (s *Cache[T, V]) UnmarshalYAML(b []byte) error {
 	return yaml.Unmarshal(b, &s.v)
 }
 
-func (s *Cache[T]) MarshalYAML() ([]byte, error) {
+func (s *Cache[T, V]) MarshalYAML() ([]byte, error) {
 	return yaml.Marshal(s.v)
 }
