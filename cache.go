@@ -14,6 +14,14 @@ type Container[T any] struct {
 	deadline time.Time
 }
 
+func NewContainer[T any](v T, deadline time.Time) *Container[T] {
+	return &Container[T]{
+		m:        &sync.RWMutex{},
+		v:        v,
+		deadline: deadline,
+	}
+}
+
 func (c *Container[T]) Load() T {
 	c.m.RLock()
 	defer c.m.RUnlock()
@@ -24,6 +32,8 @@ func (c *Container[T]) Store(v T) {
 	defer c.m.Unlock()
 	c.v = v
 }
+
+func (c *Container[T]) Expired() bool { return time.Now().UnixNano() > c.deadline.UnixNano() }
 
 type Stringer interface {
 	String() string
