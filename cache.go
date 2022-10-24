@@ -47,119 +47,119 @@ type Cache[K comparable, V any] struct {
 }
 
 // Get a value --
-func (s *Cache[K, V]) Get(k K) (t V, err error) {
-	s.m.RLock()
-	defer s.m.RUnlock()
-	if v, ok := s.v[k]; ok {
+func (c *Cache[K, V]) Get(k K) (t V, err error) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+	if v, ok := c.v[k]; ok {
 		return v.Load(), nil
 	}
 	return t, ErrKey
 }
 
 // Set a value
-func (s *Cache[K, V]) Set(k K, v V) error {
-	s.m.RLock()
-	if val, ok := s.v[k]; ok {
+func (c *Cache[K, V]) Set(k K, v V) error {
+	c.m.RLock()
+	if val, ok := c.v[k]; ok {
 		val.Store(v)
-		s.m.RUnlock()
+		c.m.RUnlock()
 		return nil
 	}
-	s.m.RUnlock()
-	s.m.Lock()
-	defer s.m.Unlock()
-	s.v[k] = s.newContainer(v)
+	c.m.RUnlock()
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.v[k] = c.newContainer(v)
 	return nil
 }
 
-func (s *Cache[K, V]) Exists(k K) bool {
-	s.m.RLock()
-	defer s.m.RUnlock()
-	_, ok := s.v[k]
+func (c *Cache[K, V]) Exists(k K) bool {
+	c.m.RLock()
+	defer c.m.RUnlock()
+	_, ok := c.v[k]
 	return ok
 }
 
 // Delete a value
-func (s *Cache[K, V]) Delete(k K) (err error) {
+func (c *Cache[K, V]) Delete(k K) (err error) {
 
-	s.m.Lock()
-	defer s.m.Unlock()
-	delete(s.v, k)
+	c.m.Lock()
+	defer c.m.Unlock()
+	delete(c.v, k)
 
 	return nil
 }
 
-func (s *Cache[K, V]) GetKeys() (out []K) {
-	s.m.RLock()
-	defer s.m.RUnlock()
-	out = make([]K, len(s.v))
+func (c *Cache[K, V]) GetKeys() (out []K) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+	out = make([]K, len(c.v))
 	var i int
-	for k := range s.v {
+	for k := range c.v {
 		out[i] = k
 		i++
 	}
 	return out
 }
 
-func New[K comparable, V any](m ...map[K]V) (s *Cache[K, V]) {
+func New[K comparable, V any](m ...map[K]V) (c *Cache[K, V]) {
 	if len(m) > 0 {
-		s = &Cache[K, V]{m: new(sync.RWMutex), v: make(map[K]*Container[V])}
+		c = &Cache[K, V]{m: new(sync.RWMutex), v: make(map[K]*Container[V])}
 		for k, v := range m[0] {
-			s.Set(k, v)
+			c.Set(k, v)
 		}
-		return s
+		return c
 	}
 	return &Cache[K, V]{m: new(sync.RWMutex), v: make(map[K]*Container[V])}
 }
 
-func (s *Cache[K, V]) janitor() {
+func (c *Cache[K, V]) janitor() {
 	for {
-		time.Sleep(s.sleepInterval)
+		time.Sleep(c.sleepInterval)
 		now := time.Now()
-		for _, k := range s.GetKeys() {
-			s.m.RLock()
-			if v, ok := s.v[k]; ok {
+		for _, k := range c.GetKeys() {
+			c.m.RLock()
+			if v, ok := c.v[k]; ok {
 				if v.deadline.Before(now) {
-					s.m.RUnlock()
-					s.unCache(k)
+					c.m.RUnlock()
+					c.unCache(k)
 				} else {
-					s.m.RUnlock()
+					c.m.RUnlock()
 				}
 			} else {
-				s.m.RUnlock()
+				c.m.RUnlock()
 			}
 		}
 	}
 }
 
-func (s *Cache[K, V]) WithExpiration(e time.Duration) *Cache[K, V] {
-	s.expire = e
+func (c *Cache[K, V]) WithExpiration(e time.Duration) *Cache[K, V] {
+	c.expire = e
 	if e > (30 * time.Second) {
-		s.sleepInterval = e
+		c.sleepInterval = e
 	} else {
-		s.sleepInterval = 30 * time.Second
+		c.sleepInterval = 30 * time.Second
 	}
-	go s.janitor()
-	return s
+	go c.janitor()
+	return c
 }
 
 func (c *Cache[K, V]) newContainer(v V) *Container[V] {
 	return &Container[V]{m: &sync.RWMutex{}, v: v, deadline: time.Now().Add(c.expire)}
 }
 
-func (s *Cache[K, V]) unCache(k K) (err error) {
-	s.m.Lock()
-	defer s.m.Unlock()
-	delete(s.v, k)
+func (c *Cache[K, V]) unCache(k K) (err error) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	delete(c.v, k)
 	return
 }
 
-func (s *Cache[K, V]) Filter(f func(V) bool) map[K]V {
-	keys := s.GetKeys()
+func (c *Cache[K, V]) Filter(f func(V) bool) map[K]V {
+	keys := c.GetKeys()
 	out := make(map[K]V)
-	s.m.RLock()
-	defer s.m.RUnlock()
+	c.m.RLock()
+	defer c.m.RUnlock()
 	for _, k := range keys {
-		value := s.v[k]
+		value := c.v[k]
 		if f(value.Load()) {
 			out[k] = value.Load()
 		}
@@ -167,28 +167,28 @@ func (s *Cache[K, V]) Filter(f func(V) bool) map[K]V {
 	return out
 }
 
-func (s *Cache[K, V]) Values() []V {
-	out := make([]V, 0, len(s.v))
-	s.m.RLock()
-	defer s.m.RUnlock()
-	for _, k := range s.GetKeys() {
-		out = append(out, s.v[k].Load())
+func (c *Cache[K, V]) Values() []V {
+	out := make([]V, 0, len(c.v))
+	c.m.RLock()
+	defer c.m.RUnlock()
+	for _, k := range c.GetKeys() {
+		out = append(out, c.v[k].Load())
 	}
 	return out
 }
 
-func (s *Cache[K, V]) UnmarshalJSON(b []byte) error {
-	return json.Unmarshal(b, &s.v)
+func (c *Cache[K, V]) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &c.v)
 }
 
-func (s *Cache[K, V]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(s.v)
+func (c *Cache[K, V]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.v)
 }
 
-func (s *Cache[K, V]) UnmarshalYAML(b []byte) error {
-	return yaml.Unmarshal(b, &s.v)
+func (c *Cache[K, V]) UnmarshalYAML(b []byte) error {
+	return yaml.Unmarshal(b, &c.v)
 }
 
-func (s *Cache[K, V]) MarshalYAML() ([]byte, error) {
-	return yaml.Marshal(s.v)
+func (c *Cache[K, V]) MarshalYAML() ([]byte, error) {
+	return yaml.Marshal(c.v)
 }
