@@ -1,11 +1,8 @@
 package gocache
 
 import (
-	"encoding/json"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Container[V any] struct {
@@ -20,6 +17,12 @@ func NewContainer[V any](v V, deadline time.Time) *Container[V] {
 		v:        v,
 		deadline: deadline,
 	}
+}
+
+func (c *Container[V]) UpdateDeadline(t time.Time) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.deadline = t
 }
 
 func (c *Container[V]) Load() V {
@@ -51,23 +54,22 @@ func (c *Cache[K, V]) Get(k K) (t V, err error) {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	if v, ok := c.v[k]; ok {
+		v.UpdateDeadline(time.Now().Add(c.expire))
 		return v.Load(), nil
 	}
 	return t, ErrKey
 }
 
 // Set a value
-func (c *Cache[K, V]) Set(k K, v V) error {
-	c.m.RLock()
-	if val, ok := c.v[k]; ok {
-		val.Store(v)
-		c.m.RUnlock()
-		return nil
-	}
-	c.m.RUnlock()
+func (c *Cache[K, V]) Set(k K, val V) error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	c.v[k] = c.newContainer(v)
+	if v, ok := c.v[k]; ok {
+		v.Store(val)
+		v.UpdateDeadline(time.Now().Add(c.expire))
+		return nil
+	}
+	c.v[k] = c.newContainer(val)
 	return nil
 }
 
@@ -131,6 +133,20 @@ func (c *Cache[K, V]) janitor() {
 	}
 }
 
+// Each provides an interface for doing something with each (k,v) pair in the cache
+func (c *Cache[K, V]) Each(f func(K, V) error) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	for k, v := range c.v {
+		if err := f(k, v.Load()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WithExpiration causes elements to be deleted after they have existed for longer than e in the cache
+// without being accessed by key
 func (c *Cache[K, V]) WithExpiration(e time.Duration) *Cache[K, V] {
 	c.expire = e
 	if e > (30 * time.Second) {
@@ -153,42 +169,11 @@ func (c *Cache[K, V]) unCache(k K) (err error) {
 	return
 }
 
-func (c *Cache[K, V]) Filter(f func(V) bool) map[K]V {
-	keys := c.GetKeys()
-	out := make(map[K]V)
-	c.m.RLock()
-	defer c.m.RUnlock()
-	for _, k := range keys {
-		value := c.v[k]
-		if f(value.Load()) {
-			out[k] = value.Load()
-		}
-	}
-	return out
-}
-
-func (c *Cache[K, V]) Values() []V {
-	out := make([]V, 0, len(c.v))
-	c.m.RLock()
-	defer c.m.RUnlock()
-	for _, k := range c.GetKeys() {
-		out = append(out, c.v[k].Load())
-	}
-	return out
-}
-
-func (c *Cache[K, V]) UnmarshalJSON(b []byte) error {
-	return json.Unmarshal(b, &c.v)
-}
-
-func (c *Cache[K, V]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.v)
-}
-
-func (c *Cache[K, V]) UnmarshalYAML(b []byte) error {
-	return yaml.Unmarshal(b, &c.v)
-}
-
-func (c *Cache[K, V]) MarshalYAML() ([]byte, error) {
-	return yaml.Marshal(c.v)
+func (c *Cache[K, V]) Copy() map[K]V {
+	kv := make(map[K]V, len(c.v))
+	c.Each(func(k K, v V) error {
+		kv[k] = v
+		return nil
+	})
+	return kv
 }
