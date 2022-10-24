@@ -8,46 +8,46 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type Container[T any] struct {
+type Container[V any] struct {
 	m        *sync.RWMutex
-	v        T
+	v        V
 	deadline time.Time
 }
 
-func NewContainer[T any](v T, deadline time.Time) *Container[T] {
-	return &Container[T]{
+func NewContainer[V any](v V, deadline time.Time) *Container[V] {
+	return &Container[V]{
 		m:        &sync.RWMutex{},
 		v:        v,
 		deadline: deadline,
 	}
 }
 
-func (c *Container[T]) Load() T {
+func (c *Container[V]) Load() V {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	return c.v
 }
-func (c *Container[T]) Store(v T) {
+func (c *Container[V]) Store(v V) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.v = v
 }
 
-func (c *Container[T]) Expired() bool { return time.Now().UnixNano() > c.deadline.UnixNano() }
+func (c *Container[V]) Expired() bool { return time.Now().UnixNano() > c.deadline.UnixNano() }
 
 type Stringer interface {
 	String() string
 }
 
-type Cache[T any, K comparable] struct {
+type Cache[K comparable, V any] struct {
 	m             *sync.RWMutex
-	v             map[K]*Container[T]
+	v             map[K]*Container[V]
 	expire        time.Duration
 	sleepInterval time.Duration
 }
 
-//Get a value --
-func (s *Cache[T, V]) Get(k V) (t T, err error) {
+// Get a value --
+func (s *Cache[K, V]) Get(k K) (t V, err error) {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	if v, ok := s.v[k]; ok {
@@ -56,25 +56,8 @@ func (s *Cache[T, V]) Get(k V) (t T, err error) {
 	return t, ErrKey
 }
 
-func (s *Cache[T, V]) Where(m func(T) bool) (v []T, err error) {
-	return s.memQuery(m)
-}
-
-func (s *Cache[T, V]) memQuery(m func(T) bool) (v []T, err error) {
-	v = make([]T, 0)
-	s.m.RLock()
-	defer s.m.RUnlock()
-	for _, k := range s.GetKeys() {
-		val := s.v[k].Load()
-		if m(val) {
-			v = append(v, val)
-		}
-	}
-	return
-}
-
-//Set a value
-func (s *Cache[T, V]) Set(k V, v T) error {
+// Set a value
+func (s *Cache[K, V]) Set(k K, v V) error {
 	s.m.RLock()
 	if val, ok := s.v[k]; ok {
 		val.Store(v)
@@ -88,15 +71,15 @@ func (s *Cache[T, V]) Set(k V, v T) error {
 	return nil
 }
 
-func (s *Cache[T, V]) Exists(k V) bool {
+func (s *Cache[K, V]) Exists(k K) bool {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	_, ok := s.v[k]
 	return ok
 }
 
-//Delete a value
-func (s *Cache[T, V]) Delete(k V) (err error) {
+// Delete a value
+func (s *Cache[K, V]) Delete(k K) (err error) {
 
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -105,10 +88,10 @@ func (s *Cache[T, V]) Delete(k V) (err error) {
 	return nil
 }
 
-func (s *Cache[T, V]) GetKeys(fromDb ...bool) (out []V) {
+func (s *Cache[K, V]) GetKeys() (out []K) {
 	s.m.RLock()
 	defer s.m.RUnlock()
-	out = make([]V, len(s.v))
+	out = make([]K, len(s.v))
 	var i int
 	for k := range s.v {
 		out[i] = k
@@ -117,18 +100,18 @@ func (s *Cache[T, V]) GetKeys(fromDb ...bool) (out []V) {
 	return out
 }
 
-func New[T any, V comparable](m ...map[V]T) (s *Cache[T, V]) {
+func New[K comparable, V any](m ...map[K]V) (s *Cache[K, V]) {
 	if len(m) > 0 {
-		s = &Cache[T, V]{m: new(sync.RWMutex), v: make(map[V]*Container[T])}
+		s = &Cache[K, V]{m: new(sync.RWMutex), v: make(map[K]*Container[V])}
 		for k, v := range m[0] {
 			s.Set(k, v)
 		}
 		return s
 	}
-	return &Cache[T, V]{m: new(sync.RWMutex), v: make(map[V]*Container[T])}
+	return &Cache[K, V]{m: new(sync.RWMutex), v: make(map[K]*Container[V])}
 }
 
-func (s *Cache[T, V]) janitor() {
+func (s *Cache[K, V]) janitor() {
 	for {
 		time.Sleep(s.sleepInterval)
 		now := time.Now()
@@ -148,7 +131,7 @@ func (s *Cache[T, V]) janitor() {
 	}
 }
 
-func (s *Cache[T, V]) WithExpiration(e time.Duration) *Cache[T, V] {
+func (s *Cache[K, V]) WithExpiration(e time.Duration) *Cache[K, V] {
 	s.expire = e
 	if e > (30 * time.Second) {
 		s.sleepInterval = e
@@ -159,20 +142,20 @@ func (s *Cache[T, V]) WithExpiration(e time.Duration) *Cache[T, V] {
 	return s
 }
 
-func (c *Cache[T, V]) newContainer(v T) *Container[T] {
-	return &Container[T]{m: &sync.RWMutex{}, v: v, deadline: time.Now().Add(c.expire)}
+func (c *Cache[K, V]) newContainer(v V) *Container[V] {
+	return &Container[V]{m: &sync.RWMutex{}, v: v, deadline: time.Now().Add(c.expire)}
 }
 
-func (s *Cache[T, V]) unCache(k V) (err error) {
+func (s *Cache[K, V]) unCache(k K) (err error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	delete(s.v, k)
 	return
 }
 
-func (s *Cache[T, V]) Filter(f func(T) bool) map[V]T {
+func (s *Cache[K, V]) Filter(f func(V) bool) map[K]V {
 	keys := s.GetKeys()
-	out := make(map[V]T)
+	out := make(map[K]V)
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range keys {
@@ -184,8 +167,8 @@ func (s *Cache[T, V]) Filter(f func(T) bool) map[V]T {
 	return out
 }
 
-func (s *Cache[T, V]) Values() []T {
-	out := make([]T, 0, len(s.v))
+func (s *Cache[K, V]) Values() []V {
+	out := make([]V, 0, len(s.v))
 	s.m.RLock()
 	defer s.m.RUnlock()
 	for _, k := range s.GetKeys() {
@@ -194,18 +177,18 @@ func (s *Cache[T, V]) Values() []T {
 	return out
 }
 
-func (s *Cache[T, V]) UnmarshalJSON(b []byte) error {
+func (s *Cache[K, V]) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &s.v)
 }
 
-func (s *Cache[T, V]) MarshalJSON() ([]byte, error) {
+func (s *Cache[K, V]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.v)
 }
 
-func (s *Cache[T, V]) UnmarshalYAML(b []byte) error {
+func (s *Cache[K, V]) UnmarshalYAML(b []byte) error {
 	return yaml.Unmarshal(b, &s.v)
 }
 
-func (s *Cache[T, V]) MarshalYAML() ([]byte, error) {
+func (s *Cache[K, V]) MarshalYAML() ([]byte, error) {
 	return yaml.Marshal(s.v)
 }
